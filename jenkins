@@ -1,0 +1,81 @@
+pipeline {
+    agent any
+    
+    tools {
+        jdk 'jdk11'
+        maven 'maven3'
+    }
+
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+    }
+
+    stages {
+        stage('Git Checkout') {
+            steps {
+                git branch: 'main',
+                    changelog: false,
+                    poll: false,
+                    url: 'https://github.com/qasir-11606016/Ekart.git'
+            }
+        }
+
+        stage('Compile') {
+            steps {
+                sh 'mvn clean compile'
+            }
+        }
+
+       
+        stage('SonarQube Analysis') {
+            options {
+        timeout(time: 5, unit: 'MINUTES')
+    }
+           
+            steps {
+                sh """
+                    $SCANNER_HOME/bin/sonar-scanner \
+                      -Dsonar.host.url=http://15.206.1.233:9000 \
+                      -Dsonar.login=squ_898a674f91427f5c34244388dafe3a40ce5b4ab8 \
+                      -Dsonar.projectName=ekart \
+                      -Dsonar.java.binaries=target/classes \
+                      -Dsonar.projectKey=ekart
+                """
+            }
+        }
+
+        stage('OWASP Dependency Check') {
+            steps {
+                dependencyCheck additionalArguments: '--scan ./', odcInstallation: 'DP'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+
+        stage('Build Application') {
+            steps {
+                sh 'mvn clean install -DskipTests=true'
+            }
+        }
+
+        stage('Build & Push Docker Image') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: '945e316b-24e8-4dbf-a9c3-b7dbb461f248', toolName: 'docker')
+                    {
+                        sh "docker build -t ekart:latest -f docker/Dockerfile ."
+                        sh "docker tag ekart:latest qasir1/ekart:latest"
+                        sh "docker push qasir1/ekart:latest"
+
+                    }
+                }
+            }
+        }
+    
+        stage('Trigger CD Pipeline') {
+            steps {
+                    build job: "CD-pipeline", wait:true,propagate: false
+            }
+        }
+    }
+    
+}
